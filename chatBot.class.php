@@ -1,129 +1,26 @@
 <?php
 
 require_once("vk_api.php");
-
-class ChatBot 
+require_once("ChatBot.settings.php");
+class ChatBot
 {
     public mysqli $db;
-    public array $supportedCommands = 
-    [
-        "general" => 
-        [
-            "/помощь" => "Help",
-            "/настройки" => "Settings"
-        ],
-        "admin" => 
-        [
-            "/предупреждение" => "GiveWarn", 
-            "/кик" => "Kick", 
-            "/мут" => "GiveMute"
-        ],
-        "mailing" => 
-        [
-            "/расписание" => "", 
-            "/подписаться" => "", 
-            "/отписаться" => ""
-        ]
-    ];
-    
-    function __construct($databaseUserName, $databasePassword, $databaseName)
+    public ChatBotSettings $settings; 
+
+    function __construct($settings, $database)
     {
-        $this->db = new mysqli(
-            "localhost", 
-            $databaseUserName, 
-            $databasePassword, 
-            $databaseName
-        );
-        if($this->db->connect_error)
-        {
-            error_log($this->db->connect_error);
-            throw new Exception("Failed to access the database");
-        }
+        $this->db = $database;
+        $this->settings = $settings;
+    }
+    function __destruct()
+    {
+        $this->db->close();
     }
 
-    public function Exec($senderId, $peerId, $options) 
-    {
-        $command = $options[0];
-
-        /*
-        * Make preppings for GENERAL commands and execute
-        */
-        if($this->IsCommand($command, "general"))
-        {
-            $command = $this->supportedCommands["general"][$command];
-            $this->$command($peerId);
-            return;
-        }
-
-        /*
-        * Make preppings for ADMIN commands and execute
-        */
-        if($this->IsCommand($command, "admin"))
-        {
-            //Return if message was send in personal chat
-            if($senderId == $peerId) 
-            {
-                VkApi::SendMessage($peerId, "Эта команда не может работать в личке.");
-                return;
-            }
-            
-            //Format user's ID
-            $userId = $options[1];
-            if(!isset($userId)) 
-            {
-                VkApi::SendMessage($peerId, "Не указан ID пользователя.");
-                return;
-            }
-            $userId = $this->FormatId($userId);
-
-            //Get user's info
-            $userObject = VkApi::GetUserInfoByScreenName($userId);
-            if(isset($userObject["error"]))    
-            {
-                VkApi::SendMessage($peerId, "Неверный ID пользователя.");
-                return;
-            }           
-            $userObject = $userObject["response"][0];
-            
-            $userId = $userObject["id"];
-            $userName = $userObject["first_name"]." ".$userObject["last_name"];
-            $userName = "[id".$userId."|".$userName."]";
-            
-            //Execute targeted command
-            $command = $this->supportedCommands["admin"][$command];
-            $this->$command($userId, $userName, $peerId, $options[2]);
-            return;
-        }
-
-        /*
-        * Make preppings for MAILING commands and execute
-        */
-        if($this->IsCommand($command, "mailing"))
-        {
-            
-        }
-
-        /*
-        * Nothing happend - this's not a command
-        */  
-        VkApi::SendMessage($peerId, "Боюсь, что такой команды нет.");
-    }
-    
-
-    //Extract numeric id from [id0000000|@screen_name]
-    public function FormatId($id)
-    {
-        return str_replace(["[", "@", "]"], "", explode("|", $id)[0]);
-    }
-    //Check whether this command exist in targeted command system or not
-    public function IsCommand($command, $commandSystem)
-    {
-        return in_array($command, array_keys($this->supportedCommands[$commandSystem]));
-    }
     //Create new table for that chat if it doesn't exist
-    public function CheckForTable($peer_id)
+    public function CheckForTable($peerId)
     {
-        $peer_id = "chat_".$peer_id;
+        $peerId = "chat_".$peerId;
         $result = $this->db->query("SHOW TABLES;");
         if(!$result) {
             error_log("cannot access the database");
@@ -132,13 +29,17 @@ class ChatBot
         $result = $result->fetch_row();
 
         //return if table exist
-        if(isset($result) && in_array($peer_id, $result)) return true;
+        if(isset($result) && in_array($peerId, $result)) return true;
         
-        $query = "CREATE TABLE $peer_id (UserID int(1), Warns int(1), Mute date, Ban date);";
+        $query = "CREATE TABLE $peerId (UserID int(1), Warns int(1), Mute date, Ban date);";
         $result = $this->db->query($query);
         return true;
     }
-
+    public function DeleteTable($peerIdd)
+    {
+        $query = "DROP TABLE chat_$peerId";
+        $result = $this->db->query($query);
+    }
 
     /*
     * Block of GENERAL commands
@@ -155,6 +56,7 @@ class ChatBot
     }
     public function Settings()
     {
+        
     }
     
 
@@ -174,16 +76,14 @@ class ChatBot
         
         //if user isn't in table, add him
         if(!isset($result))
-        {
             $query = "
                 INSERT INTO chat_$chatId (UserID, Warns) 
                 VALUES ($userId, 1);";
-        }
         //if user is in table, update his info
         else
         {
             $warns = $result["Warns"] + 1;
-            if($warns > 2)
+            if($warns >= $this->settings->maxWarns)
             {
                 $warns = 0;
                 $needMute = true;
@@ -197,15 +97,16 @@ class ChatBot
         
         if($needMute)
         {
-            $this->GiveMute($userId, $userName, $chatId, 30);
+            $this->GiveMute($userId, $userName, $chatId, $this->settings->defaultMuteTime);
             return; 
         }
         
-        $message = "Выдано предупреждение пользователю $userName. Предупреждений: $warns/3.";
+        $message = "Выдано предупреждение пользователю $userName. Предупреждений: $warns/".$this->settings->maxWarns.".";
         VkApi::SendMessage($chatId, $message);    
     }
     public function GiveMute($userId, $userName, $chatId, $time)
     {
+        if(!isset($time)) $time = $this->settings->defaultMuteTime;
         $message = "Пользователь ".$userName." теперь в муте на ".$time." минут.";
         VkApi::SendMessage($chatId, $message);           
     }

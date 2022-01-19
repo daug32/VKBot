@@ -3,6 +3,17 @@
 require_once("config.php");
 
 class VkApi {
+    public static function GetChatMembers($peer_id)
+    {
+        $response = VkApi::Call(
+            "messages.getConversationMembers",
+            array(
+                "peer_id" => $peer_id,
+                "fields" => "member_id"
+                )
+        );
+        return $response;
+    }
     public static function KickUser($userId, $chatId)
     {
         //$response;
