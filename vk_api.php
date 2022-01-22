@@ -8,26 +8,20 @@ class VkApi {
         $response = VkApi::Call(
             "messages.getConversationMembers",
             array(
-                "peer_id" => $peer_id,
-                "fields" => "member_id"
-                )
+                "peer_id" => $peer_id
+            )
         );
         return $response;
     }
-    public static function KickUser($userId, $chatId)
-    {
-        //$response;
-        // return $response;
-    }
-    public static function GetUserInfoByScreenName($screenName) 
+    public static function GetUserInfo($userId) 
     {
         $response = VkApi::Call(
             "users.get",
-            array("user_ids" => $screenName)
+            array("user_ids" => $userId)
         );
         return $response;
     }
-    public static function DeleteConversationMessage($converstaionMessageIDs, $peerId) 
+    public static function DeleteConversationMessage($peerId, $converstaionMessageIDs) 
     {
         $response = VkApi::Call(
             "messages.delete",
@@ -39,13 +33,13 @@ class VkApi {
         );
         return $response;
     }
-    public static function Kick($userId, $chatId) 
+    public static function Kick($peerId, $userId) 
     {
         $response = VkApi::Call(
             "messages.removeChatUser",
             array(
                 "user_id" => $userId,
-                "chat_id" => $chatId
+                "chat_id" => $peerId
             )
         );
         return $response;

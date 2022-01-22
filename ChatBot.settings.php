@@ -4,13 +4,13 @@ class ChatBotSettings
 {
     public int $maxWarns;
     public int $defaultMuteTime;
+    public string $commandMark;
 
-    public function __construct(
-        $maxWarns = 3, 
-        $defaultMuteTime = 30) 
+    public function __construct()
     {
-        $this->maxWarns = $maxWarns;
-        $this->defaultMuteTime = $defaultMuteTime;
+        $this->maxWarns = 3;
+        $this->defaultMuteTime = 30;
+        $this->commandMark = "/";
     }
 }
 
