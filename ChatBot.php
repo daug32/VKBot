@@ -12,22 +12,30 @@ class ChatBot
     public string $commandMark = "/";
 
     public int $groupId;
+    public int $peerId;
+    public string $tableName;
+
     public array $supportedCommands = 
     [
         "general" => 
         [
             "/помощь" => "Help",
             "/настройки" => "SetSettings",
-            "/расписание" => "", 
-            "/подписаться" => "", 
-            "/отписаться" => ""
+
+            "/help" => "Help",
+            "/settings" => "SetSettings"
         ],
         "admin" => 
         [
             "/предупреждение" => "GiveWarn", 
             "/кик" => "Kick", 
             "/мут" => "GiveMute",
-            "/бан" => "Ban"
+            "/бан" => "Ban",
+
+            "/warn" => "GiveWarn", 
+            "/kick" => "Kick", 
+            "/mute" => "GiveMute",
+            "/ban" => "Ban"
         ]
     ];  
 
@@ -51,37 +59,38 @@ class ChatBot
 
         $action = $event["action"];
         $senderId = $event["from_id"];
-        $peerId = $event["peer_id"];
         $messageId = $event["conversation_message_id"];
+        
+        $this->peerId = $event["peer_id"];
+        $this->tableName = "chat_".$this->peerId;
+
         $options = explode(" ", $event["text"]);
 
-        unset($event);
-
         //If message is not in a personal chat 
-        if($peerId != $senderId)
+        if($this->peerId != $senderId)
         {
-            $this->CheckForTable($peerId);
-            $this->LoadSettings($peerId);
+            $this->CheckForTable();
+            $this->LoadSettings();
 
             //Return if banned user was invited
             if(isset($action))
             {
-                $isAffected = $this->GetRow($peerId, $action["member_id"], "Ban") ?: 0;
+                $isAffected = $this->GetState($action["member_id"], "Ban") ?: 0;
                 $isAffected = (bool)($isAffected > (int)strtotime("now"));
                 if($action["type"] == "chat_invite_user" && $isAffected)
                 {
-                    VkApi::SendMessage($peerId, "Этот пользователь все еще находится в бане.");
-                    VkApi::Kick($peerId - 2000000000, $action["member_id"]);
+                    VkApi::SendMessage($this->peerId, "Этот пользователь все еще находится в бане.");
+                    VkApi::Kick($this->peerId - 2000000000, $action["member_id"]);
                     return;
                 }
             }
 
             //Return if banned user was invited
-            $isAffected = $this->GetRow($peerId, $senderId, "Mute") ?: 0;
+            $isAffected = $this->GetState($senderId, "Mute") ?: 0;
             $isAffected = (bool)($isAffected > (int)strtotime("now"));
             if($isAffected)
             {
-                VkApi::DeleteConversationMessage($peerId, $messageId);
+                VkApi::DeleteConversationMessage($this->peerId, $messageId);
                 return;
             }
         }
@@ -89,9 +98,9 @@ class ChatBot
         $command = $options[0];
 
         //Return if sender isn't admin
-        if(!$this->IsAdmin($peerId, $senderId))
+        if(!$this->IsAdmin($senderId))
         {
-            VkApi::SendMessage($peerId, "Вам нужны права администратора для выполнения этой команды.");
+            VkApi::SendMessage($this->peerId, "Вам нужны права администратора для выполнения этой команды.");
             return;
         }
 
@@ -101,7 +110,7 @@ class ChatBot
         if($this->IsCommand($command, "general"))
         {
             $command = $this->supportedCommands["general"][$command];
-            $this->$command($peerId, $options[1], $options[2]);
+            $this->$command($options[1], $options[2]);
             return;
         }
 
@@ -111,16 +120,16 @@ class ChatBot
         if($this->IsCommand($command, "admin"))
         {
             //Return if message was send in personal chat
-            if($senderId == $peerId) 
+            if($senderId == $this->peerId) 
             {
-                VkApi::SendMessage($peerId, "Эта команда не может работать в личке.");
+                VkApi::SendMessage($this->peerId, "Эта команда не может работать в личке.");
                 return;
             }
 
             //Return if bot isn't chat administartor
-            if(!$this->IsAdmin($peerId, -$this->groupId))
+            if(!$this->IsAdmin(-$this->groupId))
             {
-                VkApi::SendMessage($peerId, "Я не админ - у меня нет прав выполнять эту команду.");
+                VkApi::SendMessage($this->peerId, "Я не админ - у меня нет прав выполнять эту команду.");
                 return;
             }
             
@@ -132,22 +141,22 @@ class ChatBot
             )[1];
             if(!isset($userId)) 
             {
-                VkApi::SendMessage($peerId, "Не указан ID пользователя.");
+                VkApi::SendMessage($this->peerId, "Не указан ID пользователя.");
                 return;
             }
 
             //Return if target user is the sender
             if($senderId == $userId)
             {
-                VkApi::SendMessage($peerId, "Дурашка! Такие команды нельзя применять на себе.");
+                VkApi::SendMessage($this->peerId, "Дурашка! Такие команды нельзя применять на себе.");
                 return;
             }
 
             //Return if user is not a chat member
-            $userObject = $this->ChatMemberInfo($peerId, $userId);
-            if(!isset($userObject))    
+            $userObject = $this->ChatMemberInfo($userId);
+            if(!isset($userObject["id"]))    
             {
-                VkApi::SendMessage($peerId, "В чате не найден пользователь с таким ID.");
+                VkApi::SendMessage($this->peerId, "В чате не найден пользователь с таким ID.");
                 return;
             }
             
@@ -156,22 +165,22 @@ class ChatBot
             
             //Execute targeted command
             $command = $this->supportedCommands["admin"][$command];
-            $this->$command($peerId, $userId, $userName, $options[2]);
+            $this->$command($userId, $userName, $options[2]);
             return;
         }
 
         /*
         * Nothing happend - this's not a command
         */  
-        VkApi::SendMessage($peerId, "Боюсь, что такой команды нет.");
+        VkApi::SendMessage($this->peerId, "Боюсь, что такой команды нет.");
     }   
-    public function IsCommand($command, $commandSystem)
+    public function IsCommand(string $command, string $commandSystem) : bool
     {
         return in_array($command, array_keys($this->supportedCommands[$commandSystem]));
     }
-    public function IsAdmin($peerId, $userId)
+    public function IsAdmin(int $userId) : bool
     {
-        $response = VkApi::GetChatMembers($peerId);
+        $response = VkApi::GetChatMembers($this->peerId);
         if($response["error"]) return false;
 
         foreach($response["response"]["items"] as $user)    
@@ -184,10 +193,10 @@ class ChatBot
         }
         return isset($result) & boolval($result);
     }
-    public function ChatMemberInfo($peerId, $userId)
+    public function ChatMemberInfo(int $userId) : array
     {
-        $response = VkApi::GetChatMembers($peerId);
-        if($response["error"]) return;
+        $response = VkApi::GetChatMembers($this->peerId);
+        if($response["error"]) return array();
 
         foreach($response["response"]["profiles"] as $user)    
             if($user["id"] == $userId) return $user;
@@ -197,9 +206,8 @@ class ChatBot
     * Block of methods for working with DataBases
     */
     //Create new table for that chat if it doesn't exist
-    public function CheckForTable($peerId)
+    public function CheckForTable()
     {
-        $tableName = "chat_$peerId";
         $result = $this->db->query("SHOW TABLES;");
         if(!$result) 
         {
@@ -208,10 +216,10 @@ class ChatBot
         }
         
         while($row = $result->fetch_row())
-            if($row[0] == $tableName) return;
+            if($row[0] == $this->tableName) return;
         
         $query = 
-            "CREATE TABLE $tableName (
+            "CREATE TABLE ".$this->tableName." (
             UserID int(1) DEFAULT 0, 
             Warns int(1) DEFAULT 0, 
             Mute int(1) DEFAULT 0, 
@@ -220,32 +228,30 @@ class ChatBot
         $this->db->query($query);
 
         //Default properties for the chat
-        $this->UpdateUserState($peerId, 0, "Warns", $this->maxWarns);
-        $this->UpdateUserState($peerId, 0, "Mute", $this->defaultMuteTime);
-        $this->UpdateUserState($peerId, 0, "Ban", $this->defaultBanTime);
+        $this->UpdateUserState(0, "Warns", $this->maxWarns);
+        $this->UpdateUserState(0, "Mute", $this->defaultMuteTime);
+        $this->UpdateUserState(0, "Ban", $this->defaultBanTime);
     }
-    public function GetRow($peerId, $userId, $state)
+    public function GetState(int $userId, string $state)
     {
-        $tableName = "chat_$peerId";
-        $query = "SELECT $state FROM $tableName WHERE UserID=$userId;";
+        $query = "SELECT $state FROM ".$this->tableName." WHERE UserID=$userId;";
         $result = ($this->db->query($query))->fetch_assoc();
         return $result[$state];
     }
-    public function UpdateUserState($peerId, $userId, $state, $value)
+    public function UpdateUserState(int $userId, string $state, string $value)
     {
-        $tableName = "chat_$peerId";
-        $result = $this->GetRow($peerId, $userId, $state);
+        $result = $this->GetState($userId, $state);
 
         if(!isset($result))
         {
             $query = 
-                "INSERT INTO $tableName (UserID, $state)
+                "INSERT INTO ".$this->tableName." (UserID, $state)
                 VALUES ($userId, $value);";
         }
         else 
         {
             $query = 
-                "UPDATE $tableName
+                "UPDATE ".$this->tableName."
                 SET $state=$value
                 WHERE UserID=$userId;";
         }
@@ -255,36 +261,35 @@ class ChatBot
     /*
     * Block of GENERAL commands
     */
-    public function Help($peerId)
+    public function Help()
     {
         $message = 
             "Список команд.
             ================= Общее: ==================
-            1) /помощь - выводит список команд (какая неожиданность).
-            2) /настройки [предупреждения | мут | бан] <значение> - устанавливает новое базовое значение для параметра.
+            1) /помощь (или /help) - выводит список команд (какая неожиданность).
+            2) /настройки (или /settings) [предупреждения | мут | бан] <значение> - устанавливает новое базовое значение для параметра.
             =========== Администрирование: ============
-            1) /предупреждение <id пользователя> - добавляет предупреждение пользователю. После достижения максимального количества выдает мут
-            2) /мут <id пользователя> <время в минутах> - выдает мут.
-            3) /кик <id пользователя> - исключает пользователя.
-            4) /бан <id пользователя> <время в минутах> - исключает пользователя и на время запрещает ему войти.";
-        VkApi::SendMessage($peerId, $message);
+            1) /предупреждение (или /warn) <id пользователя> - добавляет предупреждение пользователю. После достижения максимального количества выдает мут
+            2) /мут (или /mute) <id пользователя> <время в минутах> - выдает мут.
+            3) /кик (или /kick) <id пользователя> - исключает пользователя.
+            4) /бан (или /ban) <id пользователя> <время в минутах> - исключает пользователя и на время запрещает ему войти.";
+        VkApi::SendMessage($this->peerId, $message);
     }
-    public function SetSettings($peerId, $prop, $newValue)
+    public function SetSettings(?string $prop, $newValue)
     {
         if(!isset($prop))
         {
-            VkApi::SendMessage($peerId, "И какой параметр мне менять?");
+            VkApi::SendMessage($this->peerId, "И какой параметр мне менять?");
             return;
         }
         if(!isset($newValue))
         {
-            VkApi::SendMessage($peerId, "Нет значения, которе нужно установить.");
+            VkApi::SendMessage($this->peerId, "Нет значения, которе нужно установить.");
             return;
         }
-        $newValue = (int)$newValue;
         if($newValue < 0)
         {
-            VkApi::SendMessage($peerId, "Недопустимое значение $newValue");
+            VkApi::SendMessage($this->peerId, "Недопустимое значение $newValue");
             return;
         }
 
@@ -292,25 +297,25 @@ class ChatBot
         {
             case "предупреждения":
                 $message = "Максимальное количество предупреждений установлено в $newValue.";
-                $this->UpdateUserState($peerId, 0, "Warns", $newValue);
+                $this->UpdateUserState(0, "Warns", $newValue);
                 break;
             case "мут":
                 $message = "Стандартное время мута установлено в $newValue минут.";
-                $this->UpdateUserState($peerId, 0, "Mute", $newValue);
+                $this->UpdateUserState(0, "Mute", $newValue);
                 break;
             case "бан":
                 $message = "Стандартное время бана установлено в $newValue минут.";
-                $this->UpdateUserState($peerId, 0, "Ban", $newValue);
+                $this->UpdateUserState(0, "Ban", $newValue);
                 break;
             default: 
                 $message = "Такого параметра нет. В команде /помощь приведены все возможные параметры. ";
                 break;
         }
-        VkApi::SendMessage($peerId, $message);
+        VkApi::SendMessage($this->peerId, $message);
     }
-    public function LoadSettings($peerId)
+    public function LoadSettings()
     {
-        $query = "SELECT * FROM chat_$peerId WHERE UserID=0;";
+        $query = "SELECT * FROM ".$this->tableName." WHERE UserID=0;";
         $result = $this->db->query($query)->fetch_assoc();
         $this->maxWarns = $result["Warns"];
         $this->defaultMuteTime = $result["Mute"];
@@ -320,9 +325,9 @@ class ChatBot
     /*
     * Block of ADMIN commands
     */
-    public function GiveWarn($peerId, $userId, $userName)
+    public function GiveWarn(int $userId, string $userName)
     {        
-        $warns = $this->GetRow($peerId, $userId, "Warns") ?: 0;
+        $warns = $this->GetState($userId, "Warns") ?: 0;
         $warns++;
         $needMute = false;
 
@@ -332,45 +337,57 @@ class ChatBot
             $warns = 0;
         }
 
-        $this->UpdateUserState($peerId, $userId, "Warns", $warns);
+        $this->UpdateUserState($userId, "Warns", $warns);
         
         if($needMute)
         {
-            $this->GiveMute($peerId, $userId, $userName, $this->defaultMuteTime);
+            $this->GiveMute($userId, $userName);
             return; 
         }
         
         $message = "Выдано предупреждение пользователю $userName. Предупреждений: $warns/".$this->maxWarns.".";
-        VkApi::SendMessage($peerId, $message);    
+        VkApi::SendMessage($this->peerId, $message);    
     }
-    public function GiveMute($peerId, $userId, $userName, $time)
+    public function GiveMute(int $userId, string $userName, $time)
     {
         if(!isset($time)) $time = $this->defaultMuteTime;
 
+        if((string)$time != (int)$time)
+        {
+            VkApi::SendMessage($this->peerId, "Я не совсем понимаю, как можно отправить в мут на \"$time\" времени. Это не число.");
+            return;
+        }
+        $time = (int)$time;
+
         if($time == 0) 
         {
-            $message = 
-                "Если $userName когда-то и был в муте, теперь его там нет.";
+            $message = "Если $userName когда-то и был в муте, теперь его там нет.";
         }
         else 
         {
-            $time = (int)$time; //make sure it's a number
             $message = "Пользователь $userName теперь в муте на $time минут.";
         }
         
         $timeInt = (int)strtotime("+$time min");
-        $this->UpdateUserState($peerId, $userId, "Mute", $timeInt);
-        VkApi::SendMessage($peerId, $message);           
+        $this->UpdateUserState($userId, "Mute", $timeInt);
+        VkApi::SendMessage($this->peerId, $message);           
     }
-    public function Kick($peerId, $userId, $userName)
+    public function Kick(int $userId, string $userName)
     {
-        VkApi::Kick($peerId - 2000000000, $userId);
+        VkApi::Kick($this->peerId - 2000000000, $userId);
         $message = "$userName был исключен :(";
-        VkApi::SendMessage($peerId, $message);  
+        VkApi::SendMessage($this->peerId, $message);  
     }
-    public function Ban($peerId, $userId, $userName, $time)
+    public function Ban(int $userId, string $userName, $time)
     {
         if(!isset($time)) $time = $this->defaultBanTime;
+
+        if((string)$time != (int)$time)
+        {
+            VkApi::SendMessage($this->peerId, "Я не совсем понимаю, как можно отправить в мут на \"$time\" времени. Это не число.");
+            return;
+        }
+        $time = (int)$time;
         
         if($time == 0) 
         {
@@ -379,26 +396,14 @@ class ChatBot
         }
         else 
         {
-            $time = (int)$time; //make sure it's a number
-            $message = "Печально признавать, но пользователь $userName теперь забанен на $time минут.";
+            $message = 
+                "Печально признавать, но пользователь $userName теперь забанен на $time минут.";
         }
         $timeInt = (int)strtotime("+$time min");
-        $this->UpdateUserState($peerId, $userId, "Ban", $timeInt);
+        $this->UpdateUserState($userId, "Ban", $timeInt);
 
-        VkApi::Kick($peerId - 2000000000, $userId);
-        VkApi::SendMessage($peerId, $message); 
-    }
-
-    
-    /*
-    * Block of MAILING commands
-    */
-    public function SendLessonPlan()
-    {
-    }
-    public function SendCommunitiesUpdates()
-    {
+        VkApi::Kick($this->peerId - 2000000000, $userId);
+        VkApi::SendMessage($this->peerId, $message); 
     }
 }
 ?>
-
