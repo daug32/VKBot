@@ -1,5 +1,5 @@
 # VkBot 
-What's it? A bot, of course. Community bot that can do not just main administrate job like kicking people and muting them, but also parse websites and send datafrom them.<br>
+What's it? A bot for Vkontakte, of course.<br>
 ## How to use?
 <ul>
 <li>First, you need to set up your own server 😔 That's needed to allow VK send you requests and notifications about current situation in your conversation.</li>
