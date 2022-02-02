@@ -11,7 +11,7 @@ if(!isset($event) || !isset($event["type"]))
     
 require("ChatBot.php");
 
-$database = new mysqli("localhost", "a0620713_admin", "4b6l3kNY", "a0620713_chats");
+$database = new mysqli("___", "___", "___", "___");
 $bot = new ChatBot($database);
 $bot->Exec($event);
 
